@@ -6,6 +6,7 @@ from typing import Any
 from dotenv import load_dotenv, set_key, get_key
 from os import getenv
 import requests
+import json
 
 
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
@@ -19,49 +20,67 @@ if not TOKEN:
     print("Failed to load token from .env")
 
 type Messages = list[dict[str, Any]] # type alias for the final appearance of messages
-type default_dict = dict[str, str | int | bool | None]
+type default_dict = dict[str, Any]
 
+class TelegramError(Exception):
+    """Any error with requests to telegram api."""
+def _api_request(method: str, data: default_dict) -> str:
+    try:
+        response = requests.post(f"{BASE_URL}/{method}", json=data, timeout=10).json()
+
+    # handling errors with a request to the telegram api
+    except requests.exceptions.RequestException as e:
+        print(f"Request error: ({e})\nCheck your internet connection or telegram services status")
+        return str(e)
+    if not response['ok']:
+        error: str = f"Error {response['error_code']}, {response['description']}"
+        print(f"\nRequest error: ({error})")
+        return error
+
+    return "success"
+
+# makes a request to telegram api and converts the result
 class Getting:
-    # makes a request to telegram API and converts the result
     @staticmethod
     def get_messages(timeout: int) -> Messages:
-        info: Messages = []
+        messages: Messages = []
 
         # handling error with parse .env
         raw_id: str | None = get_key(ENV_PATH, "LAST_UPDATE_ID")
         try:
             last_update_id = int(raw_id) # emphasizing this in IDE is normal, errors are handled
-        except (ValueError, TypeError) as Error:
+        except (ValueError, TypeError):
             error = "Failed to parse last update id from .env"
             print(f"\nError: Failed to parse last update id from .env")
-            raise Error(error)
+            raise TelegramError(error)
 
         try:
-            response = requests.get(f"{BASE_URL}/getUpdates", json={
+            response = requests.get(f"{BASE_URL}/getUpdates", params={
                 "offset": last_update_id + 1, # the last update id + 1 for deleting messages after they are received
                 "timeout": timeout,
-                "allowed_updates": ["message", "edited_message", "business_message", "edited_business_message", "deleted_business_messages"]
+                "allowed_updates": json.dumps(["message", "edited_message"])
             }).json()
 
         # handling errors with a request to the telegram api
         except requests.exceptions.RequestException as e:
             print(f"Request error: ({e})\nCheck your internet connection or telegram services status")
-            raise requests.exceptions.RequestException(e)
+            raise TelegramError(e)
         if not response['ok']:
             error: str = f"Error {response['error_code']}, {response['description']}"
             print(f"\nRequest error: ({error})")
-            raise requests.exceptions.RequestException(error)
+            raise TelegramError(error)
 
-        if response["result"]:
+        result = response["result"]
+        if result:
             set_key(ENV_PATH, "LAST_UPDATE_ID", str(response["result"][-1]["update_id"]))
 
-        for i in response['result']:
-            message_from: dict[str, Any] = i['message']['from']
+        for update in result:
+            message_from: default_dict = update['message']['from'] if 'message' in update else update['edited_message']['from']
             if not message_from['is_bot']:
-                message: dict[str, Any] = i['message']
+                message: default_dict = update['message'] if 'message' in update else update['edited_message']
 
                 # adding all data required for the bot
-                info.append({
+                messages.append({
                     "id": message_from['id'],
                     "user": {
                         "first_name": message_from['first_name'],
@@ -92,31 +111,33 @@ class Getting:
                     "contact": ['phone_number', 'first_name', 'last_name', 'user_id']
                 }
                 photo_keys: list[str] = base
-                info[-1]["content"] = {
+                messages[-1]["content"] = {
                     "media_group_id": message.get('media_group_id')
                 }
+                messages[-1]["data"]["content_type"] = None
+                content = messages[-1]["content"]
 
                 if 'text' in message:
-                    info[-1]["content"] = message['text']
+                    messages[-1]["content"] = message['text']
                 elif 'photo' in message:
                     photo: default_dict = message['photo'][-1]
-                    place: default_dict = info[-1]["content"]
-                    info[-1]["data"]["content_type"] = "photo"
-                    for j in photo_keys:
-                        place[j] = photo.get(j)
+                    place: default_dict = content
+                    messages[-1]["data"]["content_type"] = "photo"
+                    for field in photo_keys:
+                        place[field] = photo.get(field)
                 else:
-                    for j in keys:
-                        if j in message:
-                            place: default_dict = info[-1]["content"]
-                            content: default_dict = message[j]
-                            info[-1]["data"]["content_type"] = j
-                            for k in keys[j]:
+                    for field in keys:
+                        if field in message:
+                            place: default_dict = content
+                            content: default_dict = message[field]
+                            messages[-1]["data"]["content_type"] = field
+                            for k in keys[field]:
                                 place[k] = content.get(k)
                             break
                 if 'caption' in message:
-                    info[-1]["content"]["caption"] = message['caption']
+                    messages[-1]["content"]["caption"] = message['caption']
 
-        return info
+        return messages
 
 class Sending:
     @staticmethod
@@ -125,28 +146,16 @@ class Sending:
                   disable_notification: bool = False,
                   protect_content: bool = False,
                   enable_link_preview: bool = False) -> str:
-        try:
-            response = requests.post(f"{BASE_URL}/sendMessage", json={
-                'chat_id': chat_id,
-                'text': text,
-                'parse_mode': 'HTML',
-                'disable_notification': disable_notification,
-                'protect_content': protect_content,
-                'link_preview_options': {
-                    'is_disabled': not enable_link_preview
-                }
-            }).json()
-
-        # handling errors with a request to the telegram api
-        except requests.exceptions.RequestException as e:
-            print(f"Request error: ({e})\nCheck your internet connection or telegram services status")
-            raise requests.exceptions.RequestException(e)
-        if not response['ok']:
-            error: str = f"Error {response['error_code']}, {response['description']}"
-            print(f"\nRequest error: ({error})")
-            raise requests.exceptions.RequestException(error)
-
-        return "success"
+        return _api_request("sendMessage", {
+            'chat_id': chat_id,
+            'text': text,
+            'parse_mode': 'HTML',
+            'disable_notification': disable_notification,
+            'protect_content': protect_content,
+            'link_preview_options': {
+                'is_disabled': not enable_link_preview
+            }
+        })
 
     @staticmethod
     def send_reply_text(chat_id: str,
@@ -156,7 +165,7 @@ class Sending:
                         protect_content: bool = False,
                         enable_link_preview: bool = False,
                         quote: str | None = None) -> str:
-        data: dict[str, Any] = {
+        data: default_dict = {
             'chat_id': chat_id,
             'text': text,
             'parse_mode': 'HTML',
@@ -166,7 +175,7 @@ class Sending:
                 'is_disabled': not enable_link_preview
             }
         }
-
+        # adding dependent parameters
         if quote:
             data['reply_parameters'] = {
                 'message_id': reply_message_id,
@@ -176,19 +185,7 @@ class Sending:
         else:
             data['reply_parameters'] = {'message_id': reply_message_id}
 
-        try:
-            response = requests.post(f"{BASE_URL}/sendMessage", json=data).json()
-
-        # handling errors with a request to the telegram api
-        except requests.exceptions.RequestException as e:
-            print(f"Request error: ({e})\nCheck your internet connection or telegram services status")
-            return str(e)
-        if not response['ok']:
-            error: str = f"Error {response['error_code']}, {response['description']}"
-            print(f"\nRequest error: ({error})")
-            raise requests.exceptions.RequestException(error)
-
-        return "success"
+        return _api_request("sendMessage", data)
 
     @staticmethod
     def send_photo(chat_id: str,
@@ -198,7 +195,7 @@ class Sending:
                    caption: str | None = None,
                    show_caption_above_media: bool = False,
                    has_spoiler: bool = False) -> str:
-        data = {
+        data: default_dict = {
             'chat_id': chat_id,
             'photo': photo_id,
             'disable_notification': disable_notification,
@@ -207,19 +204,66 @@ class Sending:
             'caption': caption,
             'has_spoiler': has_spoiler
         }
+        # adding dependent parameter
         if caption and show_caption_above_media:
             data['show_caption_above_media'] = show_caption_above_media
 
-        try:
-            response = requests.get(f"{BASE_URL}/sendMessage", params=data).json()
+        return _api_request("sendPhoto", data)
 
-        # handling errors with a request to the telegram api
-        except requests.exceptions.RequestException as e:
-            print(f"Request error: ({e})\nCheck your internet connection or telegram services status")
-            return str(e)
-        if not response['ok']:
-            error: str = f"Error {response['error_code']}, {response['description']}"
-            print(f"\nRequest error: ({error})")
-            return error
+    @staticmethod
+    def send_reply_photo(chat_id: str,
+                         photo_id: str,
+                         reply_message_id: str,
+                         disable_notification: bool = False,
+                         protect_content: bool = False,
+                         caption: str | None = None,
+                         show_caption_above_media: bool = False,
+                         has_spoiler: bool = False,
+                         quote: str | None = None) -> str:
+        data: default_dict = {
+            'chat_id': chat_id,
+            'photo': photo_id,
+            'disable_notification': disable_notification,
+            'protect_content': protect_content,
+            'parse_mode': 'HTML',
+            'has_spoiler': has_spoiler
+        }
+        # adding dependent parameters
+        if caption:
+            data['caption'] = caption
+            if show_caption_above_media:
+                data['show_caption_above_media'] = show_caption_above_media
+        if quote:
+            data['reply_parameters'] = {
+                'message_id': reply_message_id,
+                'quote': quote,
+                'quote_parse_mode': 'HTML'
+            }
+        else:
+            data['reply_parameters'] = {'message_id': reply_message_id}
 
-        return "success"
+        return _api_request("sendPhoto", data)
+
+    @staticmethod
+    def forward_message(chat_id: str,
+                        from_chat_id: str,
+                        message_id: str,
+                        disable_notification: bool = False,
+                        protect_content: bool = False,
+                        caption: str | None = None) -> str:
+        data: default_dict = {
+            'chat_id': chat_id,
+            'from_chat_id': from_chat_id,
+            'message_id': message_id,
+            'disable_notification': disable_notification,
+            'protect_content': protect_content,
+            'parse_mode': 'HTML'
+        }
+        # adding dependent parameter
+        if caption:
+            data['caption'] = caption
+
+        return _api_request("copyMessage", data)
+
+if __name__ == '__main__':
+    Sending.send_text('1560997223', '<u><b>ГДЕ МОЕ ДЗ?!!</b></u>')
