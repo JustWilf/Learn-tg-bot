@@ -264,6 +264,3 @@ class Sending:
             data['caption'] = caption
 
         return _api_request("copyMessage", data)
-
-if __name__ == '__main__':
-    Sending.send_text('1560997223', '<u><b>ГДЕ МОЕ ДЗ?!!</b></u>')
