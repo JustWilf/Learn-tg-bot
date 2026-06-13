@@ -154,7 +154,8 @@ class Sending:
             'protect_content': protect_content,
             'link_preview_options': {
                 'is_disabled': not enable_link_preview
-            }
+            },
+            'timeout': 10
         })
 
     @staticmethod
@@ -173,7 +174,8 @@ class Sending:
             'protect_content': protect_content,
             'link_preview_options': {
                 'is_disabled': not enable_link_preview
-            }
+            },
+            'timeout': 10
         }
         # adding dependent parameters
         if quote:
@@ -189,7 +191,7 @@ class Sending:
 
     @staticmethod
     def send_photo(chat_id: str,
-                   photo_id: str,
+                   photo: str,
                    disable_notification: bool = False,
                    protect_content: bool = False,
                    caption: str | None = None,
@@ -197,22 +199,23 @@ class Sending:
                    has_spoiler: bool = False) -> str:
         data: default_dict = {
             'chat_id': chat_id,
-            'photo': photo_id,
+            'photo': photo,
             'disable_notification': disable_notification,
             'protect_content': protect_content,
             'parse_mode': 'HTML',
             'caption': caption,
-            'has_spoiler': has_spoiler
+            'has_spoiler': has_spoiler,
+            'timeout': 10
         }
         # adding dependent parameter
-        if caption and show_caption_above_media:
+        if caption and show_caption_above_media is not None:
             data['show_caption_above_media'] = show_caption_above_media
 
         return _api_request("sendPhoto", data)
 
     @staticmethod
     def send_reply_photo(chat_id: str,
-                         photo_id: str,
+                         photo: str,
                          reply_message_id: str,
                          disable_notification: bool = False,
                          protect_content: bool = False,
@@ -222,16 +225,17 @@ class Sending:
                          quote: str | None = None) -> str:
         data: default_dict = {
             'chat_id': chat_id,
-            'photo': photo_id,
+            'photo': photo,
             'disable_notification': disable_notification,
             'protect_content': protect_content,
             'parse_mode': 'HTML',
-            'has_spoiler': has_spoiler
+            'has_spoiler': has_spoiler,
+            'timeout': 10
         }
         # adding dependent parameters
         if caption:
             data['caption'] = caption
-            if show_caption_above_media:
+            if show_caption_above_media is not None:
                 data['show_caption_above_media'] = show_caption_above_media
         if quote:
             data['reply_parameters'] = {
@@ -257,7 +261,8 @@ class Sending:
             'message_id': message_id,
             'disable_notification': disable_notification,
             'protect_content': protect_content,
-            'parse_mode': 'HTML'
+            'parse_mode': 'HTML',
+            'timeout': 10
         }
         # adding dependent parameter
         if caption:
@@ -265,5 +270,56 @@ class Sending:
 
         return _api_request("copyMessage", data)
 
-if __name__ == '__main__':
-    Sending.send_text('1560997223', '<u><b>ГДЕ МОЕ ДЗ?!!</b></u>')
+    @staticmethod
+    def send_document(chat_id: str,
+                      document: str,
+                      disable_notification: bool = False,
+                      protect_content: bool = False,
+                      caption: str | None = None,
+                      content_type_detection: bool = False) -> str:
+        data: default_dict = {
+            'chat_id': chat_id,
+            'document': document,
+            'disable_notification': disable_notification,
+            'protect_content': protect_content,
+            'parse_mode': 'HTML',
+            'disable_content_type_detection': not content_type_detection,
+            'timeout': 10
+        }
+        # adding dependent parameter
+        if caption:
+            data['caption'] = caption
+
+        return _api_request("sendDocument", data)
+
+    @staticmethod
+    def send_reply_document(chat_id: str,
+                            document: str,
+                            reply_message_id: str,
+                            disable_notification: bool = False,
+                            protect_content: bool = False,
+                            content_type_detection: bool = False,
+                            caption: str | None = None,
+                            quote: str | None = None) -> str:
+        data: default_dict = {
+            'chat_id': chat_id,
+            'document': document,
+            'disable_notification': disable_notification,
+            'protect_content': protect_content,
+            'parse_mode': 'HTML',
+            'disable_content_type_detection': not content_type_detection,
+            'timeout': 10
+        }
+        # adding dependent parameters
+        if caption:
+            data['caption'] = caption
+        if quote:
+            data['reply_parameters'] = {
+                'message_id': reply_message_id,
+                'quote': quote,
+                'quote_parse_mode': 'HTML'
+            }
+        else:
+            data['reply_parameters'] = {'message_id': reply_message_id}
+
+        return _api_request("sendDocument", data)
