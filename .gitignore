@@ -2,3 +2,6 @@
 .idea
 example.json
 learn-tests.py
+.venv/
+__pycache__/
+*.pyc
